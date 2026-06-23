@@ -140,6 +140,9 @@ docs/.doctrees/
 !README.md
 !CHANGELOG.md
 
+# primersearch_studio app config (machine-local: binary path, window state)
+primersearch_studio.toml
+
 # TXT files
 *.txt
 

@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self.act_export_fasta = QAction("Export Primer Set as &FASTA…", self, triggered=self._export_fasta)
         self.act_export_csv = QAction("Export Results as &CSV…", self, triggered=self._export_csv)
         self.act_view_text = QAction("View Primer Set as &Text…", self, triggered=self._view_text)
+        self.act_view_results = QAction("View &Results as Text…", self, triggered=self._view_results_text)
         self.act_settings = QAction("App &Settings…", self, triggered=self._app_settings)
         self.act_quit = QAction("E&xit", self, shortcut=QKeySequence.Quit, triggered=self.close)
 
@@ -129,7 +130,8 @@ class MainWindow(QMainWindow):
         file_menu.addSeparator()
         file_menu.addAction(self.act_load_alignment)
         file_menu.addSeparator()
-        file_menu.addActions([self.act_export_fasta, self.act_export_csv, self.act_view_text])
+        file_menu.addActions([self.act_export_fasta, self.act_export_csv,
+                              self.act_view_text, self.act_view_results])
         file_menu.addSeparator()
         file_menu.addAction(self.act_settings)
         file_menu.addSeparator()
@@ -402,6 +404,9 @@ class MainWindow(QMainWindow):
     def _view_text(self) -> None:
         dialog = TextSetDialog(self, self.kept_panel.primers())
         dialog.exec()
+
+    def _view_results_text(self) -> None:
+        self.results_panel.open_report_dialog()
 
     def _export_fasta(self) -> None:
         if self.kept_panel.count() == 0:

@@ -21,8 +21,9 @@ from PySide6.QtWidgets import (
 
 from .. import __version__
 from ..fasta import primers_to_fasta
-from ..models import Primer
+from ..models import Primer, RunResult
 from ..params import normalize_oligo, validate_oligo
+from ..report import format_result_report
 from ..runner import check_binary
 
 MONOSPACE = QFont("Consolas")
@@ -199,6 +200,45 @@ class TextSetDialog(QDialog):
                     for i, p in enumerate(self._primers, start=1)]
             text = "\n".join(rows) + ("\n" if rows else "")
         self._text.setPlainText(text)
+
+    def _copy(self) -> None:
+        QGuiApplication.clipboard().setText(self._text.toPlainText())
+
+
+class ResultsReportDialog(QDialog):
+    """Show the full run result as the copy-pasteable text report the CLI emits."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        result: RunResult | None = None,
+        *,
+        spacing: bool = True,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Results as text")
+        self.resize(760, 620)
+
+        self._text = QPlainTextEdit()
+        self._text.setReadOnly(True)
+        self._text.setFont(MONOSPACE)
+        self._text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        if result is not None:
+            self._text.setPlainText(format_result_report(result, spacing=spacing))
+
+        copy = QPushButton("Copy to clipboard")
+        copy.clicked.connect(self._copy)
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+
+        btn_row = QHBoxLayout()
+        btn_row.addStretch(1)
+        btn_row.addWidget(copy)
+        btn_row.addWidget(close)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self._text, 1)
+        layout.addLayout(btn_row)
 
     def _copy(self) -> None:
         QGuiApplication.clipboard().setText(self._text.toPlainText())

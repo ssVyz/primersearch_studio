@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **View Results as Text** (`File → View Results as Text…`, and a *View as text*
+  button on the results panel): opens a separate window showing the full run —
+  preprocessing, resolved settings, and the primer table — as a copy-pasteable,
+  monospace text report matching the CLI's `.txt` output, with a *Copy to
+  clipboard* button. Honors the triplet-spacing display toggle. (New
+  `primersearch_studio.report` module renders the report from the parsed result.)
 - Force a consistent **light theme** at startup (Fusion style + explicit light
   palette, and the Light color scheme where supported) so the app's accent
   colors render correctly even when the OS is in dark mode (e.g. Windows dark

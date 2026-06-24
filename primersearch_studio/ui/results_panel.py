@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QMessageBox,
     QPushButton,
     QTableWidget,
     QTableWidgetItem,
@@ -22,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from ..models import PrimerHit, RunResult
 from ..params import group_oligo
-from .dialogs import MONOSPACE
+from .dialogs import MONOSPACE, ResultsReportDialog
 
 _INJECTED_BG = QColor("#eaf2fb")
 
@@ -70,11 +71,15 @@ class ResultsPanel(QWidget):
         self._keep_btn.clicked.connect(self._keep_selected)
         self._copy_btn = QPushButton("Copy sequence")
         self._copy_btn.clicked.connect(self._copy_selected)
+        self._text_btn = QPushButton("View as text")
+        self._text_btn.setToolTip("Open the full result as copy-pasteable text")
+        self._text_btn.clicked.connect(self.open_report_dialog)
 
         btn_row = QHBoxLayout()
         btn_row.addWidget(self._keep_btn)
         btn_row.addWidget(self._copy_btn)
         btn_row.addStretch(1)
+        btn_row.addWidget(self._text_btn)
 
         layout = QVBoxLayout(self)
         layout.addWidget(title)
@@ -172,10 +177,21 @@ class ResultsPanel(QWidget):
         if hits:
             QGuiApplication.clipboard().setText("\n".join(h.sequence for h in hits))
 
+    def open_report_dialog(self) -> None:
+        """Open the full result as a copy-pasteable text report."""
+        if self._result is None:
+            QMessageBox.information(
+                self, "No results", "Run primersearch first to produce results."
+            )
+            return
+        dialog = ResultsReportDialog(self, self._result, spacing=self._spacing)
+        dialog.exec()
+
     def _update_button_state(self) -> None:
         has_sel = bool(self._table.selectionModel().selectedRows()) if self._result else False
         self._keep_btn.setEnabled(has_sel)
         self._copy_btn.setEnabled(has_sel)
+        self._text_btn.setEnabled(self._result is not None)
 
     # --- rendering helper --------------------------------------------------
 

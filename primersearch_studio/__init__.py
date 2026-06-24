@@ -5,4 +5,4 @@ config/project persistence, and the subprocess runner) and a PySide6 ``ui``
 sub-package that builds on top of it.
 """
 
-__version__ = "0.1.3"
+__version__ = "0.1.4"

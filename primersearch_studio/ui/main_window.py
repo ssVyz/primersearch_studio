@@ -25,6 +25,7 @@ from ..params import validate_oligo
 from ..project import Project, ProjectError, PROJECT_SUFFIX
 from ..runner import PrimerSearchRunner
 from .dialogs import AppSettingsDialog, TextSetDialog, about_text
+from .excluded_primers_panel import ExcludedPrimersPanel
 from .kept_primers_panel import KeptPrimersPanel
 from .parameters_dock import ParametersPanel
 from .results_panel import ResultsPanel
@@ -46,6 +47,7 @@ class MainWindow(QMainWindow):
         self.setWindowTitle("primersearch_studio")
         self._build_central()
         self._build_parameters_dock()
+        self._build_excluded_dock()
         self._build_statusbar()
         self._build_actions()
         self._build_menus()
@@ -86,6 +88,20 @@ class MainWindow(QMainWindow):
         dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
         self._parameters_dock = dock
+
+    def _build_excluded_dock(self) -> None:
+        self.excluded_panel = ExcludedPrimersPanel()
+        self.excluded_panel.changed.connect(self._mark_dirty)
+        self.excluded_panel.set_spacing(self.config.triplet_spacing)
+        dock = QDockWidget("Excluded 3′ signatures", self)
+        dock.setObjectName("excluded_dock")
+        dock.setWidget(self.excluded_panel)
+        dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        # Stack behind the Parameters dock as a tab; Parameters stays on top.
+        self.tabifyDockWidget(self._parameters_dock, dock)
+        self._parameters_dock.raise_()
+        self._excluded_dock = dock
 
     def _build_statusbar(self) -> None:
         self._alignment_label = QLabel("No alignment loaded")
@@ -146,6 +162,7 @@ class MainWindow(QMainWindow):
         view_menu.addAction(self.act_spacing)
         view_menu.addSeparator()
         view_menu.addAction(self._parameters_dock.toggleViewAction())
+        view_menu.addAction(self._excluded_dock.toggleViewAction())
 
         help_menu = menubar.addMenu("&Help")
         help_menu.addAction(self.act_about)
@@ -189,6 +206,7 @@ class MainWindow(QMainWindow):
         try:
             self.parameters_panel.set_params(self.project.params)
             self.kept_panel.set_primers(self.project.primers)
+            self.excluded_panel.set_primers(self.project.excludes)
             self.results_panel.clear()
             self._alignment_info = None
             if self.project.alignment_path:
@@ -204,6 +222,7 @@ class MainWindow(QMainWindow):
     def _sync_project_from_ui(self) -> None:
         self.project.params = self.parameters_panel.params()
         self.project.primers = self.kept_panel.primers()
+        self.project.excludes = self.excluded_panel.primers()
         # alignment_path is updated directly when loading an alignment.
 
     def _confirm_discard(self) -> bool:
@@ -341,13 +360,21 @@ class MainWindow(QMainWindow):
                                     f"Sequence {seq!r}: {err}")
                 return
 
+        excluded = self.excluded_panel.sequences()
+        for seq in excluded:
+            err = validate_oligo(seq)
+            if err:
+                QMessageBox.warning(self, "Invalid excluded signature",
+                                    f"Sequence {seq!r}: {err}")
+                return
+
         params = self.parameters_panel.params()
         binary = self.config.resolved_binary()
 
         self._set_running_ui(True)
         self._run_status.setText("Running primersearch…")
         try:
-            self.runner.run(binary, self.project.alignment_path, params, injected)
+            self.runner.run(binary, self.project.alignment_path, params, injected, excluded)
         except RuntimeError as exc:
             self._set_running_ui(False)
             QMessageBox.warning(self, "Cannot run", str(exc))
@@ -464,6 +491,7 @@ class MainWindow(QMainWindow):
     def _toggle_spacing(self, enabled: bool) -> None:
         self.config.triplet_spacing = enabled
         self.kept_panel.set_spacing(enabled)
+        self.excluded_panel.set_spacing(enabled)
         self.results_panel.set_spacing(enabled)
         self._persist_config()
 

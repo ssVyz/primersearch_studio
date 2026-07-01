@@ -29,6 +29,7 @@ class Project:
     alignment_path: str = ""
     params: RunParameters = field(default_factory=RunParameters)
     primers: list[Primer] = field(default_factory=list)
+    excludes: list[Primer] = field(default_factory=list)  # --exclude 3′ signatures
     path: str | None = None  # where this project was last saved/loaded
 
     @property
@@ -41,6 +42,7 @@ class Project:
             "alignment_path": self.alignment_path,
             "params": self.params.to_dict(),
             "primers": [p.to_dict() for p in self.primers],
+            "excludes": [p.to_dict() for p in self.excludes],
         }
 
     def save(self, path: str | Path) -> None:
@@ -71,5 +73,6 @@ class Project:
             alignment_path=str(data.get("alignment_path", "")),
             params=RunParameters.from_dict(data.get("params")),
             primers=[Primer.from_dict(p) for p in data.get("primers", [])],
+            excludes=[Primer.from_dict(p) for p in data.get("excludes", [])],
             path=str(path),
         )

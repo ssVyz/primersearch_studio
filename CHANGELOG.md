@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Excluded 3′ signatures** (`--exclude`): a new dock (tabbed with *Parameters*,
+  toggleable via `View → Excluded 3′ signatures`) holding a project-scoped list
+  of oligos the search must never reproduce. Each discovered candidate whose 3′
+  end matches an excluded oligo (3′-anchored IUPAC set-intersection over the
+  shorter length) is dropped, so new primers steer clear of the 3′ ends of
+  primers used elsewhere (e.g. in a multiplex). Entries take a label/sequence/
+  notes like kept primers, are validated before the run, persist in the
+  `.psproj` project file, and honor the triplet-spacing display toggle. Kept
+  (injected) primers are exempt and the tool ignores exclusions in fixed-slice
+  mode (both noted in the panel). Passing no exclusions leaves runs byte-for-byte
+  unchanged.
 - **View Results as Text** (`File → View Results as Text…`, and a *View as text*
   button on the results panel): opens a separate window showing the full run —
   preprocessing, resolved settings, and the primer table — as a copy-pasteable,

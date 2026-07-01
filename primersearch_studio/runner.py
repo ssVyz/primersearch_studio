@@ -131,6 +131,7 @@ class PrimerSearchRunner(QObject):
         fasta_path: str,
         params: RunParameters,
         injected: list[str] | None = None,
+        excluded: list[str] | None = None,
     ) -> None:
         if self.is_running():
             raise RuntimeError("a run is already in progress")
@@ -139,7 +140,7 @@ class PrimerSearchRunner(QObject):
             binary,
             fasta_path,
             *BASE_FLAGS,
-            *build_cli_args(params, injected),
+            *build_cli_args(params, injected, excluded),
         ]
 
         worker = _RunWorker(self._command, self)

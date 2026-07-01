@@ -100,13 +100,21 @@ def validate_oligo(sequence: str) -> str | None:
     return None
 
 
-def build_cli_args(params: RunParameters, injected: list[str] | None = None) -> list[str]:
+def build_cli_args(
+    params: RunParameters,
+    injected: list[str] | None = None,
+    excluded: list[str] | None = None,
+) -> list[str]:
     """Build the parameter portion of the primersearch command line.
 
     Does *not* include the binary, the input path, or the
     ``--format/--no-config/--silent`` flags — the runner adds those. Numeric and
     enum parameters are always emitted (explicit and deterministic); boolean
     switches are emitted only when on, per the integration guide.
+
+    ``excluded`` oligos are passed via ``--exclude`` so the search never
+    reproduces their 3′ signature. They are emitted verbatim (same orientation
+    convention as ``--inject``); the tool ignores them in ``--fixed`` mode.
     """
     args: list[str] = []
 
@@ -144,5 +152,10 @@ def build_cli_args(params: RunParameters, injected: list[str] | None = None) -> 
         normalized = normalize_oligo(oligo)
         if normalized:
             args += ["--inject", normalized]
+
+    for oligo in excluded or []:
+        normalized = normalize_oligo(oligo)
+        if normalized:
+            args += ["--exclude", normalized]
 
     return args

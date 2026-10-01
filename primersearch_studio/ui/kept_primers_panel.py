@@ -228,8 +228,15 @@ class KeptPrimersPanel(QWidget):
         else:
             self._summary.setText(f"{n} primer{'s' if n != 1 else ''} kept.")
 
-    def set_coverage_summary(self, total_sequences: int, kept_coverage_pct: float) -> None:
-        """Update the summary after a run with the kept set's combined coverage."""
+    def set_coverage_summary(
+        self, total_sequences: int, kept_coverage_pct: float, *, credited: bool = False
+    ) -> None:
+        """Update the summary after a run with the kept set's combined coverage.
+
+        ``credited`` (optimize-by-mismatch runs): the figure is the coverage
+        credited to the kept primers within the whole optimized set, not their
+        stand-alone coverage, so it is worded accordingly.
+        """
         n = len(self._primers)
         if n == 0:
             self._summary.setText("No primers kept yet.")
@@ -240,10 +247,16 @@ class KeptPrimersPanel(QWidget):
         self._summary.setStyleSheet(
             "color: #1e8449; font-weight: 600;" if complete else "color: #555;"
         )
+        if credited:
+            verb = "is credited with" if n == 1 else "are credited with"
+        else:
+            verb = "cover"
         self._summary.setText(
-            f"{prefix}{n} kept primer{'s' if n != 1 else ''} cover "
+            f"{prefix}{n} kept primer{'s' if n != 1 else ''} {verb} "
             f"{covered}/{total_sequences} sequences ({kept_coverage_pct:.1f}%)"
             + (" — full coverage." if complete else ".")
+            + (" Each sequence is credited to its best-matching oligo in the set."
+               if credited else "")
         )
 
     def _flash_summary(self, message: str) -> None:

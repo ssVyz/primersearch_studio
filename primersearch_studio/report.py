@@ -13,7 +13,7 @@ Tm case — use the descriptive phrasings noted inline below.
 
 from __future__ import annotations
 
-from .models import RunResult
+from .models import MismatchBreakdown, RunResult
 from .params import group_oligo
 
 RULE_WIDTH = 90
@@ -42,6 +42,18 @@ def _compact_pct(value: float) -> str:
 
 def _label(text: str, width: int) -> str:
     return text.ljust(width)
+
+
+def _plural(count: int, singular: str, plural: str) -> str:
+    return singular if count == 1 else plural
+
+
+def criterion_label(settings: dict) -> str:
+    """Optimize-by-mismatch coverage criterion, e.g. ``up to 1 mismatch`` /
+    ``exactly 2 mismatches`` (the CLI's wording)."""
+    mismatches = int(settings.get("mismatches", 0))
+    op = "exactly" if settings.get("mismatch_mode") == "exact" else "up to"
+    return f"{op} {mismatches} {_plural(mismatches, 'mismatch', 'mismatches')}"
 
 
 def format_result_report(result: RunResult, *, spacing: bool = True) -> str:
@@ -84,7 +96,11 @@ def _results_section(result: RunResult, spacing: bool) -> list[str]:
     out += _settings_lines(result)
     out += ["", _THIN, ""]
     out += _table_lines(result, spacing)
-    out += ["", _RULE]
+    out.append("")
+    if result.mismatch is not None:
+        out += _mismatch_breakdown_lines(result.mismatch, result.settings)
+        out.append("")
+    out.append(_RULE)
     return out
 
 
@@ -106,6 +122,14 @@ def _settings_lines(result: RunResult) -> list[str]:
         search_mode = f"Incremental (target {target}%, max {max_amb} {unit})"
     elif mode == "no_ambiguities":
         search_mode = "No ambiguities (exact match)"
+    elif mode == "optimize_by_mismatch":
+        n_oligos = int(s.get("n_oligos", 0))
+        ambiguities = int(s.get("ambiguities", 0))
+        search_mode = (
+            f"Optimize by mismatch ({n_oligos} {_plural(n_oligos, 'oligo', 'oligos')}, "
+            f"{criterion_label(s)}, "
+            f"{ambiguities} {_plural(ambiguities, 'ambiguity', 'ambiguities')})"
+        )
     else:
         search_mode = mode or "?"
 
@@ -117,6 +141,9 @@ def _settings_lines(result: RunResult) -> list[str]:
 
     three_prime = int(s.get("three_prime_match", 0))
     three_prime_text = f"{three_prime} base" if three_prime == 1 else f"{three_prime} bases"
+    breakdown = result.mismatch
+    if breakdown is not None and three_prime > 0:
+        three_prime_text += " (no ambiguities or mismatches)"
 
     rows = [
         ("Analysis:", analysis),
@@ -124,6 +151,14 @@ def _settings_lines(result: RunResult) -> list[str]:
         ("Orientation:", orientation),
         ("Total Sequences:", str(result.total_sequences)),
         ("Primers Found:", str(result.primer_count)),
+    ]
+    if breakdown is not None:
+        rows.append((
+            "Coverage:",
+            f"{breakdown.counted_pct:.1f}% ({breakdown.counted:,} sequences, "
+            f"best match with {criterion_label(s)})",
+        ))
+    rows += [
         ("Tm Threshold:", tm),
         ("Oligo Conc:", f"{float(s.get('oligo_concentration_um', 0.0)):.3f} µM"),
         ("Na+ Conc:", f"{float(s.get('na_concentration_mm', 0.0)):.1f} mM"),
@@ -132,7 +167,48 @@ def _settings_lines(result: RunResult) -> list[str]:
         ("3' Perfect Match:", three_prime_text),
         ("Exclude N:", "Yes" if s.get("exclude_n") else "No"),
     ]
+    if breakdown is not None:
+        rows.append(("Candidates:", candidates_summary(breakdown)))
     return [_label(label, _SETTINGS_LABEL_W) + value for label, value in rows]
+
+
+def candidates_summary(breakdown: MismatchBreakdown) -> str:
+    """Search statistics of an optimize-by-mismatch run (the CLI's wording)."""
+    windows = breakdown.windows
+    return (
+        f"{breakdown.candidates_generated:,} generated in {windows:,} "
+        f"{_plural(windows, 'window', 'windows')}, "
+        f"{breakdown.candidates_after_reduction:,} after reduction, "
+        f"{breakdown.evaluations:,} evaluations"
+    )
+
+
+def _mismatch_breakdown_lines(breakdown: MismatchBreakdown, settings: dict) -> list[str]:
+    """Set-level table: sequences bound with 0, 1, … mismatches by their
+    best-matching oligo, and how many the set does not cover."""
+    counts = [f"{level.count:,}" for level in breakdown.levels]
+    not_covered = f"{breakdown.not_covered:,}"
+    count_w = max([len("Count"), len(not_covered)] + [len(c) for c in counts])
+
+    exact = settings.get("mismatch_mode") == "exact"
+    target = int(settings.get("mismatches", 0))
+    lines = [
+        "Mismatch breakdown (each sequence scored by its best-matching oligo):",
+        f"  {'Mismatches':<11}   {'Count':>{count_w}}   {'%':>6}   {'Total%':>7}",
+    ]
+    cumulative = 0.0
+    for level, count in zip(breakdown.levels, counts):
+        cumulative += level.pct
+        mark = "   <- counted" if exact and level.mismatches == target else ""
+        lines.append(
+            f"  {level.mismatches:<11}   {count:>{count_w}}   "
+            f"{f'{level.pct:.1f}%':>6}   {f'{cumulative:.1f}%':>7}{mark}"
+        )
+    lines.append(
+        f"  {'Not covered':<11}   {not_covered:>{count_w}}   "
+        f"{f'{breakdown.not_covered_pct:.1f}%':>6}"
+    )
+    return lines
 
 
 def _table_lines(result: RunResult, spacing: bool) -> list[str]:

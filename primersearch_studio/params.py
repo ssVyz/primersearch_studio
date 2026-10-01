@@ -15,7 +15,17 @@ IUPAC_CODES = frozenset("ACGTRYSWKMBDHVN")
 
 MODE_NO_AMBIGUITIES = "no-ambiguities"
 MODE_INCREMENTAL = "incremental"
-MODES = (MODE_NO_AMBIGUITIES, MODE_INCREMENTAL)
+MODE_OPTIMIZE_BY_MISMATCH = "optimize-by-mismatch"
+MODES = (MODE_NO_AMBIGUITIES, MODE_INCREMENTAL, MODE_OPTIMIZE_BY_MISMATCH)
+
+# Optimize-by-mismatch coverage criterion (CLI ``--mismatch-mode`` spelling).
+MISMATCH_LOWER_OR_EQUAL = "lower-or-equal"
+MISMATCH_EXACT = "exact"
+MISMATCH_MODES = (MISMATCH_LOWER_OR_EQUAL, MISMATCH_EXACT)
+
+# Optimize-by-mismatch search-space limits (the tool's defaults; 0 = no limit).
+DEFAULT_MAX_CANDIDATES = 500_000_000
+DEFAULT_MAX_WORK = 2_000_000_000
 
 ORIENTATION_FORWARD = "forward"
 ORIENTATION_REVERSE = "reverse"
@@ -46,8 +56,16 @@ class RunParameters:
     target: float = 50.0
     max_amb: int = 1
     max_seeds: int = 50
+    # IUPAC restrictions (incremental and optimize-by-mismatch)
     exclude_n: bool = False
     only_twofold: bool = False
+    # Optimize-by-mismatch-only
+    mismatch_mode: str = MISMATCH_LOWER_OR_EQUAL
+    n_oligos: int = 1
+    mismatches: int = 0
+    ambiguities: int = 0
+    max_candidates: int = DEFAULT_MAX_CANDIDATES
+    max_work: int = DEFAULT_MAX_WORK
     # Process control
     threads: int = 0
 
@@ -114,7 +132,8 @@ def build_cli_args(
 
     ``excluded`` oligos are passed via ``--exclude`` so the search never
     reproduces their 3′ signature. They are emitted verbatim (same orientation
-    convention as ``--inject``); the tool ignores them in ``--fixed`` mode.
+    convention as ``--inject``); the tool ignores them in ``--fixed`` mode,
+    except in optimize-by-mismatch mode.
     """
     args: list[str] = []
 
@@ -134,12 +153,22 @@ def build_cli_args(
     if params.three_prime and params.three_prime > 0:
         args += ["--three-prime", str(params.three_prime)]
 
-    # Incremental-only parameters are meaningless (and clutter the command) in
-    # no-ambiguities mode.
+    # Mode-specific parameters are meaningless (and clutter the command) in
+    # the other modes.
     if params.mode == MODE_INCREMENTAL:
         args += ["--target", _fmt_number(params.target)]
         args += ["--max-amb", str(params.max_amb)]
         args += ["--max-seeds", str(params.max_seeds)]
+    elif params.mode == MODE_OPTIMIZE_BY_MISMATCH:
+        args += ["--mismatch-mode", params.mismatch_mode]
+        args += ["--n-oligos", str(params.n_oligos)]
+        args += ["--mismatches", str(params.mismatches)]
+        args += ["--ambiguities", str(params.ambiguities)]
+        args += ["--max-candidates", str(params.max_candidates)]
+        args += ["--max-work", str(params.max_work)]
+
+    # IUPAC restrictions shape the consensus codes of both ambiguity modes.
+    if params.mode in (MODE_INCREMENTAL, MODE_OPTIMIZE_BY_MISMATCH):
         if params.exclude_n:
             args += ["--exclude-n"]
         if params.only_twofold:

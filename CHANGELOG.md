@@ -8,6 +8,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Optimize-by-mismatch mode** (`--mode optimize-by-mismatch`): the new
+  exhaustive primersearch method is selectable in the *Mode* dropdown. A new
+  *Optimize-by-mismatch mode* parameter group (enabled only in that mode) sets
+  the set size (`--n-oligos`), mismatches (`--mismatches`), the counting
+  criterion (`--mismatch-mode lower-or-equal|exact`), ambiguities per oligo
+  (`--ambiguities`), and the search-space limits (`--max-candidates`,
+  `--max-work`; 0 = no limit, defaults match the tool). The parameters persist
+  in projects and app defaults; older files load with the tool's defaults.
+  - Results show a **mismatch breakdown** under the table (sequences bound with
+    0, 1, … mismatches by their best-matching oligo, not covered, and the
+    counted level in `exact` mode) plus the candidate/evaluation statistics;
+    the info line reports coverage under the criterion and oligos used of *n*.
+    Coverage-column tooltips explain best-match crediting.
+  - *View Results as Text* renders the mode label, coverage line, 3′ note,
+    candidate statistics and breakdown table like the CLI's text output.
+  - Kept primers count toward the set size: a run with more kept primers than
+    *Oligos in set* is stopped with an explanation before calling the tool. The
+    kept-panel summary reports the coverage *credited* to kept primers in this
+    mode.
+  - Tool errors (e.g. a search-space limit hit) surface in the error dialog as
+    before.
+
+### Changed
+- The *Forbid N* / *Only 2-fold* checkboxes moved from the *Incremental mode*
+  group to a new *IUPAC restrictions* group, enabled in both incremental and
+  optimize-by-mismatch mode (`--exclude-n` / `--only-twofold` are now also
+  passed in optimize-by-mismatch runs).
+- The excluded-signatures hint and `--exclude` docs note that the tool applies
+  exclusions in fixed-slice runs of optimize-by-mismatch mode.
 - **Excluded 3′ signatures** (`--exclude`): a new dock (tabbed with *Parameters*,
   toggleable via `View → Excluded 3′ signatures`) holding a project-scoped list
   of oligos the search must never reproduce. Each discovered candidate whose 3′

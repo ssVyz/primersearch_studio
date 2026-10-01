@@ -103,6 +103,56 @@ class PrimerHit:
         )
 
 
+@dataclass
+class MismatchLevel:
+    """Sequences whose best-matching oligo has exactly ``mismatches`` mismatches."""
+
+    mismatches: int
+    count: int
+    pct: float
+
+
+@dataclass
+class MismatchBreakdown:
+    """Set-level coverage of an optimize-by-mismatch run (``result.mismatch_breakdown``).
+
+    Every sequence is scored by its best-matching oligo in the set. ``counted``
+    is the optimized objective (the sum of the primers' ``coverage_count``);
+    the remaining fields are search statistics.
+    """
+
+    counted: int
+    counted_pct: float
+    levels: list[MismatchLevel]
+    not_covered: int
+    not_covered_pct: float
+    windows: int
+    candidates_generated: int
+    candidates_after_reduction: int
+    evaluations: int
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "MismatchBreakdown":
+        return cls(
+            counted=int(data.get("counted", 0)),
+            counted_pct=float(data.get("counted_pct", 0.0)),
+            levels=[
+                MismatchLevel(
+                    mismatches=int(level["mismatches"]),
+                    count=int(level["count"]),
+                    pct=float(level["pct"]),
+                )
+                for level in data.get("levels", [])
+            ],
+            not_covered=int(data.get("not_covered", 0)),
+            not_covered_pct=float(data.get("not_covered_pct", 0.0)),
+            windows=int(data.get("windows", 0)),
+            candidates_generated=int(data.get("candidates_generated", 0)),
+            candidates_after_reduction=int(data.get("candidates_after_reduction", 0)),
+            evaluations=int(data.get("evaluations", 0)),
+        )
+
+
 class ResultError(ValueError):
     """Raised when a JSON document does not match the expected contract."""
 
@@ -119,6 +169,8 @@ class RunResult:
     injected_count: int
     message: str
     primers: list[PrimerHit] = field(default_factory=list)
+    # Only present in optimize-by-mismatch mode.
+    mismatch: MismatchBreakdown | None = None
 
     @classmethod
     def from_doc(cls, doc: dict) -> "RunResult":
@@ -130,6 +182,7 @@ class RunResult:
             )
         result = doc.get("result", {})
         primers = [PrimerHit.from_dict(p) for p in result.get("primers", [])]
+        breakdown = result.get("mismatch_breakdown")
         return cls(
             raw=doc,
             preprocessing=doc.get("preprocessing", {}),
@@ -139,7 +192,13 @@ class RunResult:
             injected_count=int(result.get("injected_count", 0)),
             message=str(result.get("message", "") or ""),
             primers=primers,
+            mismatch=MismatchBreakdown.from_dict(breakdown) if breakdown else None,
         )
+
+    @property
+    def is_mismatch_mode(self) -> bool:
+        """True for an optimize-by-mismatch result (best-match credited coverage)."""
+        return self.settings.get("mode") == "optimize_by_mismatch"
 
     @property
     def final_coverage_pct(self) -> float:
@@ -153,6 +212,11 @@ class RunResult:
         Injected primers are emitted first and ``cumulative_pct`` is monotonic,
         so the last injected primer's cumulative value is the kept set's
         combined coverage.
+
+        In optimize-by-mismatch mode this is the coverage *credited* to the
+        kept primers instead: each counted sequence goes to its best-matching
+        oligo in the whole set (ties to the one listed first), so a sequence a
+        found oligo matches better is not counted here.
         """
         injected = [p for p in self.primers if p.injected]
         return injected[-1].cumulative_pct if injected else 0.0

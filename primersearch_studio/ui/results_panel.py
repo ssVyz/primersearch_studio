@@ -21,11 +21,23 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from ..models import PrimerHit, RunResult
+from ..models import MismatchBreakdown, PrimerHit, RunResult
 from ..params import group_oligo
+from ..report import candidates_summary, criterion_label
 from .dialogs import MONOSPACE, ResultsReportDialog
 
 _INJECTED_BG = QColor("#eaf2fb")
+
+# Header tooltips of the coverage columns, per result kind.
+_COV_TIPS = {
+    False: ("Sequences this primer newly covers", "Share of all sequences this primer newly covers",
+            "Coverage reached by this primer and all above it"),
+    True: ("Counted sequences credited to this oligo: each goes to its best-matching "
+           "oligo in the set (ties to the one listed first)",
+           "Share of all sequences credited to this oligo",
+           "Coverage credited to this oligo and all above it; the last row is the "
+           "set's coverage"),
+}
 
 
 class ResultsPanel(QWidget):
@@ -66,6 +78,16 @@ class ResultsPanel(QWidget):
             header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
         self._table.doubleClicked.connect(lambda *_: self._keep_selected())
         self._table.itemSelectionChanged.connect(self._update_button_state)
+        self._set_coverage_tooltips(mismatch=False)
+
+        # Optimize-by-mismatch only: set-level mismatch breakdown + search stats.
+        self._breakdown = QLabel("")
+        self._breakdown.setTextFormat(Qt.RichText)
+        self._breakdown.setWordWrap(True)
+        self._breakdown.setVisible(False)
+        self._breakdown.setStyleSheet(
+            "background: #f4f6f7; padding: 6px; border-radius: 4px;"
+        )
 
         self._keep_btn = QPushButton("Keep selected →")
         self._keep_btn.clicked.connect(self._keep_selected)
@@ -86,6 +108,7 @@ class ResultsPanel(QWidget):
         layout.addWidget(self._message)
         layout.addWidget(self._info)
         layout.addWidget(self._table, 1)
+        layout.addWidget(self._breakdown)
         layout.addLayout(btn_row)
 
         self._update_button_state()
@@ -110,6 +133,8 @@ class ResultsPanel(QWidget):
         self._result = None
         self._table.setRowCount(0)
         self._message.setVisible(False)
+        self._breakdown.setVisible(False)
+        self._set_coverage_tooltips(mismatch=False)
         self._info.setText("Run the tool to see primer suggestions here.")
         self._update_button_state()
 
@@ -121,6 +146,13 @@ class ResultsPanel(QWidget):
             self._message.setVisible(True)
         else:
             self._message.setVisible(False)
+
+        if result.mismatch is not None:
+            self._breakdown.setText(self._build_breakdown(result.mismatch, result.settings))
+            self._breakdown.setVisible(True)
+        else:
+            self._breakdown.setVisible(False)
+        self._set_coverage_tooltips(mismatch=result.is_mismatch_mode)
 
         self._table.setRowCount(len(result.primers))
         for row, hit in enumerate(result.primers):
@@ -143,10 +175,22 @@ class ResultsPanel(QWidget):
         removed = pre.get("removed", {})
         total_removed = removed.get("total", 0)
         settings = result.settings
-        parts = [
-            f"{result.total_sequences} sequences covered",
-            f"{result.primer_count} primers ({result.injected_count} injected)",
-            f"final coverage {result.final_coverage_pct:.1f}%",
+        if result.mismatch is not None:
+            # Not every sequence need be covered: the set size is fixed.
+            parts = [
+                f"{result.total_sequences} sequences",
+                f"{result.primer_count} of {settings.get('n_oligos', '?')} oligos "
+                f"({result.injected_count} injected)",
+                f"coverage {result.mismatch.counted_pct:.1f}% "
+                f"(best match with {criterion_label(settings)})",
+            ]
+        else:
+            parts = [
+                f"{result.total_sequences} sequences covered",
+                f"{result.primer_count} primers ({result.injected_count} injected)",
+                f"final coverage {result.final_coverage_pct:.1f}%",
+            ]
+        parts += [
             f"mode {settings.get('mode', '?')}",
             f"orientation {settings.get('orientation', '?')}",
         ]
@@ -158,6 +202,49 @@ class ResultsPanel(QWidget):
                 f"invalid {removed.get('invalid', 0)}, wrong length {removed.get('wrong_length', 0)})."
             )
         return line
+
+    @staticmethod
+    def _build_breakdown(breakdown: MismatchBreakdown, settings: dict) -> str:
+        """Rich-text table: sequences bound with 0, 1, … mismatches by their
+        best-matching oligo, plus the uncovered rest and the search statistics."""
+        exact = settings.get("mismatch_mode") == "exact"
+        target = int(settings.get("mismatches", 0))
+        muted = "color: #888;"
+        cell = 'style="padding: 0 10px 0 0;"'
+        num = 'align="right" style="padding: 0 10px 0 0;"'
+
+        rows = [
+            f"<tr><th align='left' {cell}>Mismatches</th><th {num}>Count</th>"
+            f"<th {num}>%</th><th {num}>Total %</th><th></th></tr>"
+        ]
+        cumulative = 0.0
+        for level in breakdown.levels:
+            cumulative += level.pct
+            counted = not exact or level.mismatches == target
+            style = "" if counted else f' style="{muted}"'
+            mark = "← counted" if exact and counted else ""
+            rows.append(
+                f"<tr{style}><td {cell}>{level.mismatches}</td>"
+                f"<td {num}>{level.count}</td><td {num}>{level.pct:.1f}</td>"
+                f"<td {num}>{cumulative:.1f}</td><td>{mark}</td></tr>"
+            )
+        rows.append(
+            f"<tr style='{muted}'><td {cell}>Not covered</td>"
+            f"<td {num}>{breakdown.not_covered}</td>"
+            f"<td {num}>{breakdown.not_covered_pct:.1f}</td><td></td><td></td></tr>"
+        )
+        return (
+            "<b>Mismatch breakdown</b> "
+            f"<span style='{muted}'>(each sequence scored by its best-matching oligo)</span>"
+            f"<table cellspacing='0'>{''.join(rows)}</table>"
+            f"<span style='{muted}'>Candidates: {candidates_summary(breakdown)}</span>"
+        )
+
+    def _set_coverage_tooltips(self, *, mismatch: bool) -> None:
+        for col, tip in zip((2, 3, 4), _COV_TIPS[mismatch]):
+            item = self._table.horizontalHeaderItem(col)
+            if item is not None:
+                item.setToolTip(tip)
 
     # --- actions -----------------------------------------------------------
 

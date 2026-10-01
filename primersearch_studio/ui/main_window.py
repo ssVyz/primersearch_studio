@@ -21,7 +21,7 @@ from .. import __version__
 from ..config import AppConfig
 from ..fasta import FastaInfo, scan_fasta, write_primers_fasta
 from ..models import PrimerHit, RunResult
-from ..params import validate_oligo
+from ..params import MODE_OPTIMIZE_BY_MISMATCH, validate_oligo
 from ..project import Project, ProjectError, PROJECT_SUFFIX
 from ..runner import PrimerSearchRunner
 from .dialogs import AppSettingsDialog, TextSetDialog, about_text
@@ -369,6 +369,15 @@ class MainWindow(QMainWindow):
                 return
 
         params = self.parameters_panel.params()
+        if params.mode == MODE_OPTIMIZE_BY_MISMATCH and len(injected) > params.n_oligos:
+            QMessageBox.warning(
+                self, "Set too small",
+                f"{len(injected)} primers are kept, but the optimized set holds only "
+                f"{params.n_oligos} (Oligos in set). Kept primers are fixed members "
+                "of the set and count toward it — raise Oligos in set or remove kept "
+                "primers.",
+            )
+            return
         binary = self.config.resolved_binary()
 
         self._set_running_ui(True)
@@ -393,7 +402,9 @@ class MainWindow(QMainWindow):
 
     def _on_run_succeeded(self, result: RunResult) -> None:
         self.results_panel.show_result(result)
-        self.kept_panel.set_coverage_summary(result.total_sequences, result.kept_coverage_pct)
+        self.kept_panel.set_coverage_summary(
+            result.total_sequences, result.kept_coverage_pct, credited=result.is_mismatch_mode
+        )
         msg = f"Done — {result.primer_count} primers, {result.final_coverage_pct:.1f}% coverage."
         if result.message:
             msg += " (see note above results)"

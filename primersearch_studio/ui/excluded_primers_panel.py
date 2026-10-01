@@ -49,7 +49,7 @@ class ExcludedPrimersPanel(QWidget):
             "primers avoid the 3′ ends of primers you use elsewhere. Give them in "
             "the same orientation as the run (for reverse runs, the reverse-"
             "complement form you would order), just like kept primers. Ignored in "
-            "fixed-slice mode."
+            "fixed-slice mode, except in optimize-by-mismatch mode."
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: #555;")

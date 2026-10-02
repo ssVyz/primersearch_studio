@@ -24,8 +24,10 @@ iteratively.
 2. Tune the run in the **Parameters** dock (Tm/conditions, mode, orientation,
    fixed-slice, 3′ match, incremental and optimize-by-mismatch options, IUPAC
    restrictions, threads).
-3. Click **Update** (`F5`). primersearch runs off the UI thread; results appear
-   on the right with coverage, Tm, and position for each primer.
+3. Click **Update** (`F5`). primersearch runs off the UI thread; the status bar
+   shows live progress (elapsed time, the current phase, a progress bar, and in
+   optimize-by-mismatch's set search the evaluations used of *Max work*).
+   Results appear on the right with coverage, Tm, and position for each primer.
 4. **Keep** good candidates: select rows on the right and click *Keep selected →*
    (or double-click). They move to the left and are injected into the next run.
 5. Re-run and iterate until the kept set reaches **100% coverage** (shown in the
@@ -47,6 +49,9 @@ uv run python -m primersearch_studio
 By default primersearch_studio calls `primersearch` from your `PATH`. To point
 at a specific build, use `File → App Settings…`, browse to the executable, and
 hit **Test** to confirm it responds. The path is stored in the app config.
+
+primersearch **0.1.1 or newer** is required: runs pass `--progress jsonl` to
+get the live progress stream, which older builds reject (the app then says so).
 
 ## Files
 

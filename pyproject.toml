@@ -1,6 +1,6 @@
 [project]
 name = "primersearch-studio"
-version = "0.1.6"
+version = "0.1.7"
 description = "A PySide6 GUI front-end for the primersearch primer-design tool"
 readme = "README.md"
 requires-python = ">=3.12"

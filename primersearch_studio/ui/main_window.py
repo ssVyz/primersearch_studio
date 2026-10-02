@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 from pathlib import Path
 
-from PySide6.QtCore import QByteArray, Qt
+from PySide6.QtCore import QByteArray, QElapsedTimer, Qt, QTimer
 from PySide6.QtGui import QAction, QKeySequence
 from PySide6.QtWidgets import (
     QDockWidget,
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
 from .. import __version__
 from ..config import AppConfig
 from ..fasta import FastaInfo, scan_fasta, write_primers_fasta
-from ..models import PrimerHit, RunResult
+from ..models import PrimerHit, RunProgress, RunResult
 from ..params import MODE_OPTIMIZE_BY_MISMATCH, validate_oligo
 from ..project import Project, ProjectError, PROJECT_SUFFIX
 from ..runner import PrimerSearchRunner
@@ -32,6 +32,17 @@ from .results_panel import ResultsPanel
 
 _PROJECT_FILTER = f"primersearch_studio project (*{PROJECT_SUFFIX})"
 _FASTA_FILTER = "FASTA files (*.fasta *.fa *.fna *.txt);;All files (*)"
+
+# Status-bar run text is elided beyond this width (full text in the tooltip) so
+# long progress messages never widen the window.
+_RUN_STATUS_MAX_PX = 560
+
+
+def _format_elapsed(ms: int) -> str:
+    """``m:ss``, or ``h:mm:ss`` from one hour on."""
+    hours, rest = divmod(max(0, ms) // 1000, 3600)
+    minutes, seconds = divmod(rest, 60)
+    return f"{hours}:{minutes:02d}:{seconds:02d}" if hours else f"{minutes}:{seconds:02d}"
 
 
 class MainWindow(QMainWindow):
@@ -115,6 +126,15 @@ class MainWindow(QMainWindow):
         bar.addPermanentWidget(self._run_status)
         bar.addPermanentWidget(self._progress)
 
+        # Live run feedback: the elapsed time ticks every second and the latest
+        # --progress event from primersearch is appended to it.
+        self._run_clock = QElapsedTimer()
+        self._run_ticker = QTimer(self)
+        self._run_ticker.setInterval(1000)
+        self._run_ticker.timeout.connect(self._refresh_run_status)
+        self._run_detail = ""
+        self._cancelling = False
+
     def _build_actions(self) -> None:
         self.act_new = QAction("&New Project", self, shortcut=QKeySequence.New, triggered=self._new_project)
         self.act_open = QAction("&Open Project…", self, shortcut=QKeySequence.Open, triggered=self._open_project)
@@ -180,6 +200,7 @@ class MainWindow(QMainWindow):
         self.runner.succeeded.connect(self._on_run_succeeded)
         self.runner.failed.connect(self._on_run_failed)
         self.runner.cancelled.connect(self._on_run_cancelled)
+        self.runner.progress.connect(self._on_run_progress)
         self.runner.finished.connect(self._on_run_finished)
 
     # ------------------------------------------------------------------ dirty / title
@@ -381,17 +402,58 @@ class MainWindow(QMainWindow):
         binary = self.config.resolved_binary()
 
         self._set_running_ui(True)
-        self._run_status.setText("Running primersearch…")
+        self._start_run_feedback()
         try:
             self.runner.run(binary, self.project.alignment_path, params, injected, excluded)
         except RuntimeError as exc:
+            self._end_run_feedback()
             self._set_running_ui(False)
             QMessageBox.warning(self, "Cannot run", str(exc))
 
     def _on_cancel(self) -> None:
         if self.runner.is_running():
-            self._run_status.setText("Cancelling…")
+            self._cancelling = True
+            self._refresh_run_status()
             self.runner.cancel()
+
+    # --- live run feedback (elapsed time + progress stream) ------------------
+
+    def _start_run_feedback(self) -> None:
+        self._run_detail = ""
+        self._cancelling = False
+        self._progress.setRange(0, 0)  # busy until the first progress event
+        self._run_clock.start()
+        self._run_ticker.start()
+        self._refresh_run_status()
+
+    def _end_run_feedback(self) -> str:
+        """Stop the ticker; return the run's elapsed time for the final message."""
+        self._run_ticker.stop()
+        return _format_elapsed(self._run_clock.elapsed()) if self._run_clock.isValid() else "0:00"
+
+    def _refresh_run_status(self) -> None:
+        if self._cancelling:
+            self._set_run_status("Cancelling…")
+            return
+        detail = self._run_detail or "starting primersearch…"
+        self._set_run_status(f"Running · {_format_elapsed(self._run_clock.elapsed())} · {detail}")
+
+    def _set_run_status(self, text: str) -> None:
+        metrics = self._run_status.fontMetrics()
+        self._run_status.setText(metrics.elidedText(text, Qt.ElideRight, _RUN_STATUS_MAX_PX))
+        self._run_status.setToolTip(text)
+
+    def _on_run_progress(self, event: RunProgress) -> None:
+        if not self._run_ticker.isActive():
+            return  # a straggler after the run already ended
+        self._run_detail = event.summary()
+        percent = event.percent
+        if percent is None:
+            self._progress.setRange(0, 0)  # no estimate (set search)
+        else:
+            self._progress.setRange(0, 1000)
+            self._progress.setValue(round(percent * 10))
+        self._refresh_run_status()
 
     def _set_running_ui(self, running: bool) -> None:
         self._progress.setVisible(running)
@@ -401,23 +463,27 @@ class MainWindow(QMainWindow):
         self.act_load_alignment.setEnabled(not running)
 
     def _on_run_succeeded(self, result: RunResult) -> None:
+        elapsed = self._end_run_feedback()
         self.results_panel.show_result(result)
         self.kept_panel.set_coverage_summary(
             result.total_sequences, result.kept_coverage_pct, credited=result.is_mismatch_mode
         )
-        msg = f"Done — {result.primer_count} primers, {result.final_coverage_pct:.1f}% coverage."
+        msg = (f"Done in {elapsed} — {result.primer_count} primers, "
+               f"{result.final_coverage_pct:.1f}% coverage.")
         if result.message:
             msg += " (see note above results)"
-        self._run_status.setText(msg)
+        self._set_run_status(msg)
 
     def _on_run_failed(self, message: str) -> None:
-        self._run_status.setText("Run failed.")
+        self._set_run_status(f"Run failed after {self._end_run_feedback()}.")
         QMessageBox.critical(self, "primersearch error", message)
 
     def _on_run_cancelled(self) -> None:
-        self._run_status.setText("Run cancelled.")
+        self._set_run_status(f"Run cancelled after {self._end_run_feedback()}.")
 
     def _on_run_finished(self) -> None:
+        self._end_run_feedback()
+        self._cancelling = False
         self._set_running_ui(False)
         self._update_run_enabled()
 

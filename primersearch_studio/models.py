@@ -153,6 +153,78 @@ class MismatchBreakdown:
         )
 
 
+def _opt_int(data: dict, key: str) -> int | None:
+    value = data.get(key)
+    return int(value) if isinstance(value, (int, float)) and not isinstance(value, bool) else None
+
+
+@dataclass
+class RunProgress:
+    """One ``{"type":"progress", …}`` line of primersearch's ``--progress jsonl``
+    stream (stderr). Counters are ``None`` where the phase does not carry them.
+    """
+
+    message: str
+    pct: float
+    phase: str = ""
+    done: int | None = None
+    total: int | None = None
+    round: int | None = None
+    covered: int | None = None
+    ranges: int | None = None
+    generated: int | None = None
+    candidates: int | None = None
+    evaluations: int | None = None
+    max_work: int | None = None
+
+    # The tool prefixes every optimize-by-mismatch message with this; the
+    # status bar is narrow, so it is dropped for display.
+    _MISMATCH_PREFIX = "Optimize by mismatch: "
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "RunProgress":
+        pct = data.get("pct")
+        return cls(
+            message=str(data.get("message", "")),
+            pct=float(pct) if isinstance(pct, (int, float)) else 0.0,
+            phase=str(data.get("phase", "") or ""),
+            **{key: _opt_int(data, key) for key in (
+                "done", "total", "round", "covered", "ranges", "generated",
+                "candidates", "evaluations", "max_work",
+            )},
+        )
+
+    @property
+    def percent(self) -> float | None:
+        """Bar position in 0–100, or ``None`` when no estimate exists.
+
+        The set search cannot predict its total work, so it has none. Greedy
+        rounds report a per-round ``pct`` that restarts every round; the share
+        of sequences covered so far is the monotonic overall measure there.
+        """
+        if self.phase == "set_search":
+            return None
+        if self.phase in ("round", "fixed") and self.covered is not None and self.total:
+            return max(0.0, min(100.0, self.covered / self.total * 100.0))
+        return max(0.0, min(100.0, self.pct))
+
+    def summary(self) -> str:
+        """Short, human-readable description for the status bar."""
+        if self.phase == "set_search" and self.candidates is not None and self.evaluations is not None:
+            text = (f"Searching sets over {self.candidates:,} candidates · "
+                    f"{self.evaluations:,} evaluations")
+            if self.max_work:
+                text += f" ({self.evaluations / self.max_work:.1%} of max work)"
+            return text
+        text = self.message
+        if text.startswith(self._MISMATCH_PREFIX):
+            text = text[len(self._MISMATCH_PREFIX):]
+            text = text[:1].upper() + text[1:]
+        if self.phase == "reduce" and self.generated is not None:
+            text += f" · {self.generated:,} candidates generated"
+        return text
+
+
 class ResultError(ValueError):
     """Raised when a JSON document does not match the expected contract."""
 

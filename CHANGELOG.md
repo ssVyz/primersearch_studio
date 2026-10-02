@@ -8,6 +8,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Live run progress** in the status bar: elapsed time (ticking every
+  second), the current phase from primersearch (e.g. *Generated candidates for
+  2961/5541 window(s)*, *Reducing the candidate pool*, *Round 2: evaluating …*)
+  and a determinate progress bar. The optimize-by-mismatch set search, which
+  has no estimate, shows a busy bar plus *evaluations (x% of max work)* so you
+  can see how close a run is to its limit. Greedy runs show coverage so far as
+  the bar. The final message includes the run time (*Done in 1:23 — …*,
+  *Run failed after …*, *Run cancelled after …*). Long texts are elided, with
+  the full text in the tooltip.
+  - Runs now pass `--progress jsonl` (requires **primersearch ≥ 0.1.1**). The
+    runner reads stderr line by line while the tool works and drains stdout
+    on a helper thread, so large results cannot block the pipe. A failed run
+    shows the tool's JSON `error` message. An older build that rejects
+    `--progress` gets a clear "update primersearch" message.
 - **Optimize-by-mismatch mode** (`--mode optimize-by-mismatch`): the new
   exhaustive primersearch method is selectable in the *Mode* dropdown. A new
   *Optimize-by-mismatch mode* parameter group (enabled only in that mode) sets

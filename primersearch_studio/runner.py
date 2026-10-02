@@ -3,6 +3,12 @@
 A :class:`QThread` worker runs ``subprocess.Popen`` so the GUI stays responsive,
 the console window never flashes on Windows (``CREATE_NO_WINDOW``), and
 cancellation is a clean ``kill()`` (the tool is CPU-bound, so killing is safe).
+
+Runs pass ``--progress jsonl``: primersearch then writes one JSON object per
+line to stderr (``progress`` events while it works, an ``error`` event before a
+non-zero exit) while stdout carries only the result document. The worker reads
+stderr line by line as it arrives and forwards progress to the UI; stdout is
+drained on a helper thread so a large result can never block the pipe.
 """
 
 from __future__ import annotations
@@ -14,12 +20,13 @@ import threading
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from .models import ResultError, RunResult
+from .models import ResultError, RunProgress, RunResult
 from .params import RunParameters, build_cli_args
 
 # Always-on flags that make a run machine-friendly, deterministic, and
-# side-effect-free (Section 2 of the integration guide).
-BASE_FLAGS = ["--format", "json", "--no-config", "--silent"]
+# side-effect-free (Section 2 of the integration guide), plus the
+# machine-readable progress stream on stderr (primersearch >= 0.1.1).
+BASE_FLAGS = ["--format", "json", "--no-config", "--silent", "--progress", "jsonl"]
 
 _CREATE_NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
 
@@ -37,6 +44,7 @@ class _RunWorker(QThread):
     succeeded = Signal(object)  # RunResult
     failed = Signal(str)
     cancelled = Signal()
+    progress = Signal(object)  # RunProgress
 
     def __init__(self, command: list[str], parent: QObject | None = None) -> None:
         super().__init__(parent)
@@ -66,7 +74,7 @@ class _RunWorker(QThread):
                     stderr=subprocess.PIPE,
                     **_popen_kwargs(),
                 )
-            stdout_b, stderr_b = self._proc.communicate()
+            stdout_b, error_message, plain_stderr = self._collect_output(self._proc)
         except FileNotFoundError:
             self.failed.emit(
                 "could not start primersearch — check the binary path in App Settings"
@@ -81,11 +89,20 @@ class _RunWorker(QThread):
             return
 
         stdout = (stdout_b or b"").decode("utf-8", errors="replace")
-        stderr = (stderr_b or b"").decode("utf-8", errors="replace").strip()
         returncode = self._proc.returncode
 
         if returncode != 0:
-            self.failed.emit(stderr or f"primersearch exited with code {returncode}")
+            if returncode == 2 and "--progress" in plain_stderr:
+                # clap rejected the flag: a build from before the progress stream.
+                self.failed.emit(
+                    "This primersearch build does not support --progress (live "
+                    "progress needs primersearch 0.1.1 or newer). Update primersearch "
+                    "or point App Settings at a newer build.\n\n" + plain_stderr
+                )
+                return
+            self.failed.emit(
+                error_message or plain_stderr or f"primersearch exited with code {returncode}"
+            )
             return
 
         try:
@@ -102,6 +119,47 @@ class _RunWorker(QThread):
 
         self.succeeded.emit(result)
 
+    def _collect_output(self, proc: subprocess.Popen) -> tuple[bytes, str, str]:
+        """Stream stderr until EOF, emitting progress; return
+        ``(stdout bytes, JSON error message, remaining plain stderr text)``.
+        """
+        chunks: list[bytes] = []
+        drain = threading.Thread(target=lambda: chunks.append(proc.stdout.read()), daemon=True)
+        drain.start()
+
+        error_message = ""
+        plain: list[str] = []
+        for raw in proc.stderr:
+            line = raw.decode("utf-8", errors="replace").strip()
+            if not line:
+                continue
+            event = _parse_event(line)
+            if event is None:
+                plain.append(line)  # clap errors, the plain "error: …" line, info
+            elif event.get("type") == "progress":
+                self.progress.emit(RunProgress.from_dict(event))
+            elif event.get("type") == "error":
+                error_message = str(event.get("message", "")).strip()
+
+        drain.join()
+        proc.wait()
+        stdout = chunks[0] if chunks else b""
+        if error_message:
+            # The JSON error repeats the plain "error: …" line; keep only the rest.
+            plain = [ln for ln in plain if ln != f"error: {error_message}"]
+        return stdout, error_message, "\n".join(plain)
+
+
+def _parse_event(line: str) -> dict | None:
+    """A ``--progress jsonl`` event, or ``None`` for a plain-text stderr line."""
+    if not line.startswith("{"):
+        return None
+    try:
+        event = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    return event if isinstance(event, dict) else None
+
 
 class PrimerSearchRunner(QObject):
     """Runs a single primersearch invocation at a time and reports the outcome."""
@@ -109,6 +167,7 @@ class PrimerSearchRunner(QObject):
     succeeded = Signal(object)  # RunResult
     failed = Signal(str)
     cancelled = Signal()
+    progress = Signal(object)  # RunProgress, while a run is in progress
     finished = Signal()  # always emitted after succeeded/failed/cancelled
 
     def __init__(self, parent: QObject | None = None) -> None:
@@ -147,6 +206,7 @@ class PrimerSearchRunner(QObject):
         worker.succeeded.connect(self.succeeded)
         worker.failed.connect(self.failed)
         worker.cancelled.connect(self.cancelled)
+        worker.progress.connect(self.progress)
         worker.finished.connect(self._on_worker_finished)
         self._worker = worker
         worker.start()
